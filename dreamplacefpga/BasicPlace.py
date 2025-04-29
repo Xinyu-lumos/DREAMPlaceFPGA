@@ -361,7 +361,8 @@ class BasicPlaceFPGA(nn.Module):
         self.op_collections.lut_ff_legalization_op = self.build_lut_ff_legalization(params, placedb, self.data_collections, self.device)
 
         # Timing-driven
-        self.op_collections.timing_op = self.build_timing_op(params, placedb, self.data_collections, timer)
+        if params.timing_driven_flag:
+            self.op_collections.timing_op = self.build_timing_op(params, placedb, self.data_collections, timer)
 
         # Timing nets preconditioner
         self.op_collections.precond_timing_op = self.build_precondTiming(params, placedb, self.data_collections, self.device)
@@ -648,10 +649,13 @@ class BasicPlaceFPGA(nn.Module):
         """
         timing_feedback = timing.TimingFeedback(
             timer=timer, 
+            placedb=placedb,
+            pin2node_map=data_collections.pin2node_map,
             tnet2net=data_collections.tnet2net_map, 
             tnet_criticality=data_collections.tnet_criticality, 
             tnet_weights=data_collections.tnet_weights,
             criticality_exp=params.criticality_exponent, 
+            num_threads=params.num_threads,
             device=self.device)
         
         return timing_feedback

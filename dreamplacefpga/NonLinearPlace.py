@@ -383,8 +383,10 @@ class NonLinearPlaceFPGA (BasicPlaceFPGA):
                             cur_pos = self.pos[0].data.clone().cpu().numpy()
 
                             # compute congestion threshold
-                            route_utilization_map = self.op_collections.route_utilization_map_op(self.pos[0]).data.clone().cpu().numpy()
-                            pin_utilization_map = self.op_collections.pin_utilization_map_op(self.pos[0]).data.clone().cpu().numpy()
+                            route_utilization_map_tensor = self.op_collections.route_utilization_map_op(self.pos[0])
+                            route_utilization_map = route_utilization_map_tensor.data.clone().cpu().numpy()
+                            pin_utilization_map_tensor = self.op_collections.pin_utilization_map_op(self.pos[0])
+                            pin_utilization_map = pin_utilization_map_tensor.data.clone().cpu().numpy()
                             sorted_route_utilization = np.sort(route_utilization_map.ravel()[np.flatnonzero(route_utilization_map)])
                             sorted_pin_utilization = np.sort(pin_utilization_map.ravel()[np.flatnonzero(pin_utilization_map)])
                             route_utilization_thresh_5 = sorted_route_utilization[int(0.95 * len(sorted_route_utilization))]
@@ -393,8 +395,10 @@ class NonLinearPlaceFPGA (BasicPlaceFPGA):
                             # Report timing step.
                             tt = time.time()
                             pin_pos = self.op_collections.pin_pos_op(model.data_collections.pos[0])
-
-                            upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing(pin_pos, route_utilization_map, pin_utilization_map, route_utilization_thresh_5, pin_utilization_thresh_5)
+                
+                            # upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing_old(pin_pos, route_utilization_map, pin_utilization_map, route_utilization_thresh_5, pin_utilization_thresh_5)
+                            ## DEBUG gpu timing forward ###  
+                            upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing(pin_pos, route_utilization_map_tensor, pin_utilization_map_tensor, route_utilization_thresh_5, pin_utilization_thresh_5)
                             self.data_collections.tnet_weights.data.copy_(upd_tnet_wts_criticality[:placedb.num_tnets])
                             self.data_collections.tnet_criticality.data.copy_(upd_tnet_wts_criticality[placedb.num_tnets:])
                             
@@ -745,7 +749,8 @@ class NonLinearPlaceFPGA (BasicPlaceFPGA):
                 route_utilization_thresh_5 = sorted_route_utilization[int(0.95 * len(sorted_route_utilization))]
                 pin_utilization_thresh_5 = sorted_pin_utilization[int(0.95 * len(sorted_pin_utilization))]
 
-                upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing(self.op_collections.pin_pos_op(model.data_collections.pos[0]), route_utilization_map, pin_utilization_map, route_utilization_thresh_5, pin_utilization_thresh_5)
+                # upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing_old(self.op_collections.pin_pos_op(model.data_collections.pos[0]), route_utilization_map, pin_utilization_map, route_utilization_thresh_5, pin_utilization_thresh_5)
+                upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing(pin_pos, route_utilization_map_tensor, pin_utilization_map_tensor, route_utilization_thresh_5, pin_utilization_thresh_5)
                 self.data_collections.tnet_weights.data.copy_(upd_tnet_wts_criticality[:placedb.num_tnets])
                 self.data_collections.tnet_criticality.data.copy_(upd_tnet_wts_criticality[placedb.num_tnets:])
         
@@ -901,8 +906,9 @@ class NonLinearPlaceFPGA (BasicPlaceFPGA):
                 route_utilization_thresh_5 = sorted_route_utilization[int(0.95 * len(sorted_route_utilization))]
                 pin_utilization_thresh_5 = sorted_pin_utilization[int(0.95 * len(sorted_pin_utilization))]
 
-                upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing(self.op_collections.pin_pos_op(model.data_collections.pos[0]), route_utilization_map, pin_utilization_map, route_utilization_thresh_5, pin_utilization_thresh_5)
-
+                # upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing_old(self.op_collections.pin_pos_op(model.data_collections.pos[0]), route_utilization_map, pin_utilization_map, route_utilization_thresh_5, pin_utilization_thresh_5)
+                upd_tnet_wts_criticality = self.op_collections.timing_op.update_timing(pin_pos, route_utilization_map_tensor, pin_utilization_map_tensor, route_utilization_thresh_5, pin_utilization_thresh_5)
+                
 
         # plot placement 
         #if params.plot_flag: 

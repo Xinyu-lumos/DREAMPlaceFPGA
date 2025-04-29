@@ -35,7 +35,7 @@ class Timer:
     """
 
     def __init__(self, params, placedb):
-        # get device information through RapidWright API
+        # initialize
         self.part = params.part_name
         self.timing_file_dir = params.timing_file_dir
         self.loc2site_map = placedb.loc2site_map
@@ -48,9 +48,8 @@ class Timer:
         # build timing model and timing graph
         self.tmodel = TimingModel(self.part, self.timing_file_dir, self.loc2site_map, self.num_sites_x, self.num_sites_y)
         tt = time.time()
-        self.tgraph = timing_graph.TimingGraph(self.tmodel, placedb, params.timing_constraint)   
-        logging.info("Build timing graph and logic delays takes %.2f seconds" % (time.time() - tt))
-
+        self.tgraph = timing_graph.TimingGraph(self.tmodel, placedb, params.timing_constraint) 
+        logging.info("Build timing graph and logic delays takes %.2f seconds" % (time.time() - tt))  
 
 class TimingModel():
     """ 
@@ -59,7 +58,6 @@ class TimingModel():
     def __init__(self, part, timing_file_dir, loc2site_map, num_sites_x, num_sites_y):
         """
         @brief initialization
-        @param device device extracted by Rapidwright
         @param loc2site_map map x,y,z to site_name
         """
 
@@ -71,8 +69,8 @@ class TimingModel():
         self.delay_logic = {}
         self.build_logic_delay_lookup()
         self.a0, self.a1, self.bias = self.curve_fit_linear() # curve fit parameters
-        self.d_p = 1000 # delay penalty per unit route utilization
-        self.d_r = 50 # delay penalty per unit pin utilization
+        self.d_r = 1000 # delay penalty per unit route utilization
+        self.d_p = 50 # delay penalty per unit pin utilization
 
     def get_net_delay(self, source_x, source_y, sink_x, sink_y):
         """
@@ -111,7 +109,7 @@ class TimingModel():
 
         congestion_delay = 0
         if route_utilization_avg > route_utilization_thresh_5 and pin_utilization_avg > pin_utilization_thresh_5:
-            congestion_delay = self.d_p * route_utilization_avg + self.d_r * pin_utilization_avg
+            congestion_delay = self.d_r * route_utilization_avg + self.d_p * pin_utilization_avg
 
         return congestion_delay
 
