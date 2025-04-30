@@ -1,7 +1,7 @@
 ##
 # @file   timing_graph.py
 # @author Zhili Xiong
-# @date   Mar 2023
+# @date   Mar 2023,  updated Mar 2025 
 # @brief  Main file implementing the timing graph in python.
 #
 
@@ -18,6 +18,7 @@ import pdb
 import igraph as ig
 import itertools
 from matplotlib import pyplot as plt
+import pickle   
 
 class TimingVertex():
     """ 
@@ -145,6 +146,7 @@ class TimingGraph():
         self.pin_utilization_map = None
         self.route_utilization_thresh_5 = 0
         self.pin_utilization_thresh_5 = 0
+        self.tau = 1.5
         
         # Creating a empty graph using the igraph tool
         self.tgraph = ig.Graph(directed=True)
@@ -156,6 +158,9 @@ class TimingGraph():
 
         # Safely add timing edges for timing nets
         self.tnet2edge = {} # stores {tnet_id: timing_edge_obj}
+        self.tnet2dst = [-1]*self.num_tnets
+        self.tnet2src = [-1]*self.num_tnets
+
         tt = time.time()
         self.build_logic_edges()
         # logging.info("Adding timing edges for logics takes %.2f seconds" % (time.time() - tt))
@@ -176,6 +181,7 @@ class TimingGraph():
         
         self.ordered_timing_vertices = list(self.tgraph.topological_sorting(mode="OUT"))
         self.reversed_timing_vertices = list(reversed(self.ordered_timing_vertices))
+
 
     def build_logic_edges(self):
         """
@@ -319,6 +325,8 @@ class TimingGraph():
                 if self.net2pincount_map[self.tnet2net[i]] > 1000:
                     e.is_high_fanout = True
                 self.tnet2edge[i] = e
+                self.tnet2src[i] = source_vertex_id
+                self.tnet2dst[i] = sink_vertex_id
                 e.logic_delay = logic_delay
                 net_edge_list.append((source_vertex_id, sink_vertex_id))
                 edge_obj_list['obj'].append(e)
@@ -363,6 +371,7 @@ class TimingGraph():
             edge_list_super_sink.append((vertex_id, self.num_vertices+1))
             edge_obj_list_super_sink['obj'].append(e)
 
+        self.num_timing_endpoints = len(sinks)
         self.tgraph.add_edges(edge_list_super_source, edge_obj_list_super_source)
         self.tgraph.add_edges(edge_list_super_sink, edge_obj_list_super_sink)
     
@@ -387,7 +396,7 @@ class TimingGraph():
 
             net_delay = self.tmodel.get_net_delay(src_pin_x, src_pin_y, dst_pin_x, dst_pin_y) + self.tmodel.get_congestion_delay(src_pin_x, src_pin_y, dst_pin_x, dst_pin_y, self.route_utilization_map, self.pin_utilization_map, self.route_utilization_thresh_5, self.pin_utilization_thresh_5)
             if e.is_high_fanout == True:
-                net_delay = net_delay * 1.5
+                net_delay = net_delay * self.tau
             e.net_delay = net_delay
 
     def reset(self):
@@ -418,6 +427,19 @@ class TimingGraph():
                     timing_edge.dst_node.arrival_time = max(arrival, timing_edge.dst_node.arrival_time)
                 timing_edge.dst_node.prev = timing_edge.src_node
 
+        ## DEBUG: Zhili dump out all the arrival times at each vertex  
+        # at_vertices = []
+        # net_delay_vertices = np.zeros(self.num_vertices)
+        # for i in range(self.num_vertices):
+        #     v = self.tgraph.vs[i]
+        #     at_vertices.append(v['obj'].arrival_time)
+        #     if v.indegree() == 1:
+        #         for e in v.in_edges():
+        #             net_delay_vertices[i] = e['obj'].net_delay
+        # pickle.dump(at_vertices, open("arrival_times_golden.pkl", "wb"))
+        # pickle.dump(net_delay_vertices, open("net_delays_golden.pkl", "wb"))
+        # exit(0)
+
     def compute_required_time(self):
         """
         @brief compute required arrival time through reversed topological order
@@ -438,6 +460,14 @@ class TimingGraph():
                     timing_edge.src_node.required_time = remainingRequiredTime
                 else:
                     timing_edge.src_node.required_time = min(remainingRequiredTime, timing_edge.src_node.required_time)
+
+        # ## DEBUG: Zhili dump out all the required times at each vertex  
+        # rat_vertices = []
+        # for i in range(self.num_vertices):
+        #     v = self.tgraph.vs[i]
+        #     rat_vertices.append(v['obj'].required_time)
+        # pickle.dump(rat_vertices, open("required_times_golden.pkl", "wb"))
+        # exit(0)
 
     def compute_slack(self):
         """
@@ -590,7 +620,7 @@ class TimingGraph():
         """
 
         self.levelized_vertices = {} # stores {level: [vertex, ...]}
-        self.levelized_vertices[0] = [self.tgraph.vs[self.num_vertices]]
+        self.levelized_vertices[0] = [self.tgraph.vs[self.num_vertices]] # super source has the topo level 0
         l = 0
 
         while l <= self.max_level:
@@ -607,6 +637,75 @@ class TimingGraph():
                         self.max_level = max(self.max_level, l+1)
 
             l += 1
+
+    def build_timing_graph_tensors(self, device):
+        """
+        Transform the timing graph data into tensors
+        """
+        vertex2pin = [-1]*(self.num_vertices+2)
+        pin2vertex = [-1]*self.num_pins  
+        flat_vertex2pred = []
+        flat_vertex2pred_start = [0]
+        flat_vertex2succ = []
+        flat_vertex2succ_start = [0]
+        vertex_logic_delays = [0]*self.num_vertices
+        self.vertex_levelization()
+        levelized_vertices_unique = {l :[] for l in range(self.max_level+2)}
+        is_high_fanout = [0]*self.num_vertices
+        ## traverse based on the order of vertex list including super source and sink
+        for v_id in range(self.num_vertices+2):
+            v = self.tgraph.vs[v_id]
+            v_obj = self.tgraph.vs[v_id]['obj']
+            levelized_vertices_unique[v_obj.topo_level].append(v_id)
+            
+            ## for physical pins
+            if v_id < self.num_vertices:
+                vertex2pin[v_id] = v_obj.pin_id
+                pin2vertex[v_obj.pin_id] = v_id
+                outEdges = v.out_edges()
+                # attach logic delay to the src vertex of each timing edge
+                for e in outEdges:
+                    vertex_logic_delays[v_id] = e['obj'].logic_delay
+                    if e['obj'].is_high_fanout == True:
+                        is_high_fanout[v_id] = 1
+
+            ## build the flat vertex to predecessor and successor list
+            for s in v.successors():
+                flat_vertex2succ.append(s.index)
+
+            for u in v.predecessors():
+                flat_vertex2pred.append(u.index)
+
+            flat_vertex2succ_start.append(len(flat_vertex2succ))
+            flat_vertex2pred_start.append(len(flat_vertex2pred))
+
+        ## update the topological level of each vertex
+        flat_levelized_vertices = []
+        flat_levelized_vertices_start = [0]
+        ##  manually add super source at level 0
+        flat_levelized_vertices.append(self.num_vertices)
+        flat_levelized_vertices_start.append(1)
+        for l in range(1, self.max_level+2):
+            flat_levelized_vertices.extend(levelized_vertices_unique[l])
+            flat_levelized_vertices_start.append(len(flat_levelized_vertices))
+
+        ## convert python lists into torch tensors
+        vertex2pin = torch.tensor(vertex2pin, dtype=torch.int32, device=device)
+        pin2vertex = torch.tensor(pin2vertex, dtype=torch.int32, device=device)
+        flat_vertex2pred = torch.tensor(flat_vertex2pred, dtype=torch.int32, device=device)
+        flat_vertex2pred_start = torch.tensor(flat_vertex2pred_start, dtype=torch.int32, device=device)
+        flat_vertex2succ = torch.tensor(flat_vertex2succ, dtype=torch.int32, device=device)
+        flat_vertex2succ_start = torch.tensor(flat_vertex2succ_start, dtype=torch.int32, device=device)
+        is_high_fanout = torch.tensor(is_high_fanout, dtype=torch.int32, device=device)
+        flat_levelized_vertices = torch.tensor(flat_levelized_vertices, dtype=torch.int32, device=device)
+        flat_levelized_vertices_start = torch.tensor(flat_levelized_vertices_start, dtype=torch.int32, device=device)
+        vertex_logic_delays = torch.tensor(vertex_logic_delays, dtype=torch.float32, device=device)
+        tnet2dst = torch.tensor(self.tnet2dst, dtype=torch.int32, device=device)
+        tnet2src = torch.tensor(self.tnet2src, dtype=torch.int32, device=device)
+
+        return vertex2pin, tnet2src, tnet2dst, flat_vertex2pred, flat_vertex2pred_start, flat_vertex2succ, flat_vertex2succ_start, is_high_fanout, \
+                vertex_logic_delays, flat_levelized_vertices, flat_levelized_vertices_start
+
 
 def get_node_pin(full_name):
     """ 
