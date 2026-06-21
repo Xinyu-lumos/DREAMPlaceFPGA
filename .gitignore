@@ -1,0 +1,14 @@
+# Project files (not tracked - only learning notes are pushed)
+/dreamplacefpga/
+/benchmarks/
+/bin/
+/cmake/
+/IFsupport/
+/images/
+/test/
+/test_interchange/
+/timing/
+/thirdparty/
+/unitest/
+/CMakeLists.txt
+/LICENSE
